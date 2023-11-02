@@ -1,0 +1,11 @@
+streamlit
+folium
+pandas
+xgboost
+numpy
+scikit-learn
+seaborn
+matplotlib
+hyperopt
+geopandas
+streamlit-folium
