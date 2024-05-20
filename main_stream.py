@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import folium
+from folium import plugins, folium
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from sklearn.model_selection import train_test_split
@@ -51,6 +51,16 @@ if uploaded_data_file:
                             fill=True,
                             fill_opacity=0.7).add_to(m1)
     st_data1 = st_folium(m1, width=700, height=500)
+  # Map 1: Original Data
+    st.subheader("Original Data Map 2")
+    map3 = folium.Map(location=[filtered_df['Lat'].mean(), filtered_df['Lon'].mean()], tiles="OpenStreetMap",
+                     zoom_start=7)
+
+    heat_data = [[point.xy[0][0], point.xy[1][0]] for point in filtered_df.geometry]
+    print(heat_data[0])
+    plugins.HeatMap(heat_data, radius=12).add_to(map3)
+    map3
+    st_data3 = st_folium(map3, width=700, height=500)
 
     # Map 2: Clustered Data
     st.subheader("Clustered Data Map")
@@ -60,13 +70,13 @@ if uploaded_data_file:
         folium.Marker(location=[row['Lat'], row['Lon']],
                       popup=f"Cluster: {row['GeoCluster']}").add_to(marker_cluster)
     st_data2 = st_folium(m2, width=700, height=500)
-
+    features = ['TotalArea', 'NrRooms', 'Balcony', 'Floor', 'NumberOfFloors', 'Lat', 'Lon', 'UpdateMonth',
+                'GeoCluster']
     # Model Training
     st.header("Train the Model")
     if st.button("Train Model"):
         target = 'Price'
-        features = ['TotalArea', 'NrRooms', 'Balcony', 'Floor', 'NumberOfFloors', 'Lat', 'Lon', 'UpdateMonth',
-                    'GeoCluster']
+
         X_train, X_test, y_train, y_test = train_test_split(filtered_df[features], filtered_df[target], test_size=0.2,
                                                             random_state=42)
         rf_regressor = RandomForestRegressor(n_estimators=100, random_state=42)
