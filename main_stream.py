@@ -15,7 +15,8 @@ from sklearn.preprocessing import StandardScaler
 st.title("House Price Prediction with Clustering and Filtering")
 
 uploaded_data_file = st.file_uploader("Upload JSON Dataset", type="json")
-
+features = ['TotalArea', 'NrRooms', 'Balcony', 'Floor', 'NumberOfFloors', 'Lat', 'Lon', 'UpdateMonth',
+            'GeoCluster']
 if uploaded_data_file:
     df = pd.read_json(uploaded_data_file)
 
@@ -70,8 +71,8 @@ if uploaded_data_file:
         folium.Marker(location=[row['Lat'], row['Lon']],
                       popup=f"Cluster: {row['GeoCluster']}").add_to(marker_cluster)
     st_data2 = st_folium(m2, width=700, height=500)
-    features = ['TotalArea', 'NrRooms', 'Balcony', 'Floor', 'NumberOfFloors', 'Lat', 'Lon', 'UpdateMonth',
-                'GeoCluster']
+
+
     # Model Training
     st.header("Train the Model")
     if st.button("Train Model"):
