@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import folium
-from folium.plugins import MarkerCluster, ClickForMarker
+from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
@@ -93,8 +93,7 @@ number_of_floors = st.number_input("Number of floors in the building", value=5, 
 # Map for selecting coordinates
 st.subheader("Select Coordinates on the Map")
 m_select = folium.Map(location=[47.0105, 28.8638], zoom_start=12)
-click_for_marker = ClickForMarker()
-m_select.add_child(click_for_marker)
+m_select.click_for_marker(popup='Waypoint')
 st_data_select = st_folium(m_select, width=700, height=500)
 
 # Get the selected coordinates
