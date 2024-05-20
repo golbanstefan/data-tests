@@ -1,198 +1,136 @@
 import streamlit as st
 import pandas as pd
-import geopandas as geopandas
-import numpy as np
-from folium import plugins, folium
-import streamlit_folium as sf
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import OneHotEncoder
+import folium
+from folium.plugins import MarkerCluster
+from streamlit_folium import st_folium
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, BayesianRidge, ElasticNet
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.metrics import explained_variance_score as evs
-from sklearn.metrics import r2_score as r2
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
-# Your code, refactored for Streamlit
+# Load the dataset
+st.title("House Price Prediction with Clustering and Filtering")
 
-# Importing dataset:
-df = pd.read_json('preprocessed_old.json')
+uploaded_data_file = st.file_uploader("Upload JSON Dataset", type="json")
 
-# Transform coordinates to geopandas
-geometry = geopandas.points_from_xy(df.Lat, df.Lon)
-geo_df = geopandas.GeoDataFrame(
-    df[["Title", "Price", "Lon", "Lat"]], geometry=geometry
-)
-print(geo_df.head())
+if uploaded_data_file:
+    df = pd.read_json(uploaded_data_file)
 
-# Your existing code for creating the map
-map = folium.Map(location=[47.036953, 28.833097], tiles="OpenStreetMap", zoom_start=7)
+    # Data Cleaning
+    df['UpdatedAt'] = pd.to_datetime(df['UpdatedAt'])
 
-heat_data = [[point.xy[0][0], point.xy[1][0]] for point in geo_df.geometry]
-plugins.HeatMap(heat_data, radius=12).add_to(map)
+    # Feature Engineering
+    df['UpdateMonth'] = df['UpdatedAt'].dt.month
+    df['UpdateYear'] = df['UpdatedAt'].dt.year
 
-# Display the map in Streamlit
-sf.folium_static(map)
+    # Apply Filtering Conditions
+    filtered_df = df[(df['Price'] >= 25000) & (df['Price'] <= 200000) & (df['NrRooms'] > 0)]
 
+    # Standardize the features for clustering
+    clustering_features_geo = ['Lat', 'Lon']
+    scaler_geo = StandardScaler()
+    scaled_data_geo = scaler_geo.fit_transform(filtered_df[clustering_features_geo])
 
-df.drop(columns=['Title',
-                 'Region',
-                 'Author',
-                 'AuthorProfile',
-                 'Description',
-                 'UpdatedAt',
-                 'Lon',
-                 'Type',
-                 'Lat'], axis=1, inplace=True)
+    # Perform KMeans clustering based on 'Lat' and 'Lon'
+    kmeans_geo = KMeans(n_clusters=25, random_state=42)
+    filtered_df['GeoCluster'] = kmeans_geo.fit_predict(scaled_data_geo)
 
-# OneHotEncoder for categorical features
-s = (df.dtypes == 'object')
-object_cols = list(s[s].index)
-OH_encoder = OneHotEncoder(sparse_output=False)
-OH_cols = pd.DataFrame(OH_encoder.fit_transform(df[object_cols]))
-OH_cols.index = df.index
-OH_cols.columns = OH_encoder.get_feature_names_out()
-df_final = df.drop(object_cols, axis=1)
-df_final = pd.concat([df_final, OH_cols], axis=1)
+    # Visualization with Two Maps
+    st.header("Map Visualizations")
 
-# Drop missing values
-df_final.dropna(inplace=True)
+    # Map 1: Original Data
+    st.subheader("Original Data Map")
+    m1 = folium.Map(location=[filtered_df['Lat'].mean(), filtered_df['Lon'].mean()], zoom_start=13)
+    for idx, row in filtered_df.iterrows():
+        folium.CircleMarker(location=[row['Lat'], row['Lon']],
+                            radius=5,
+                            color='blue',
+                            fill=True,
+                            fill_opacity=0.7).add_to(m1)
+    st_data1 = st_folium(m1, width=700, height=500)
 
-# Display scatter plot for Price vs TotalArea
-fig, ax = plt.subplots(figsize=(10, 6))
-sns.scatterplot(x='TotalArea', y='Price', data=df_final, ax=ax)
-ax.set_title('Price vs TotalArea')
-st.pyplot(fig)
+    # Map 2: Clustered Data
+    st.subheader("Clustered Data Map")
+    m2 = folium.Map(location=[filtered_df['Lat'].mean(), filtered_df['Lon'].mean()], zoom_start=13)
+    marker_cluster = MarkerCluster().add_to(m2)
+    for idx, row in filtered_df.iterrows():
+        folium.Marker(location=[row['Lat'], row['Lon']],
+                      popup=f"Cluster: {row['GeoCluster']}").add_to(marker_cluster)
+    st_data2 = st_folium(m2, width=700, height=500)
 
-# Display box plot for Price distribution by NrRooms
-fig, ax = plt.subplots(figsize=(10, 6))
-sns.boxplot(x='NrRooms', y='Price', data=df_final, ax=ax)
-ax.set_title('Price distribution by NrRooms')
-st.pyplot(fig)
+    # Model Training
+    st.header("Train the Model")
+    if st.button("Train Model"):
+        target = 'Price'
+        features = ['TotalArea', 'NrRooms', 'Balcony', 'Floor', 'NumberOfFloors', 'Lat', 'Lon', 'UpdateMonth',
+                    'GeoCluster']
+        X_train, X_test, y_train, y_test = train_test_split(filtered_df[features], filtered_df[target], test_size=0.2,
+                                                            random_state=42)
+        rf_regressor = RandomForestRegressor(n_estimators=100, random_state=42)
+        rf_regressor.fit(X_train, y_train)
 
+        # Evaluation
+        y_pred = rf_regressor.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+        rmse = mse ** 0.5
+        r2 = r2_score(y_test, y_pred)
+        st.write(f'MSE: {mse}, RMSE: {rmse}, R2: {r2}')
 
-#%%
-def remove_outliers_iqr(dataframe, columns, multiplier=1.5):
-    for column in columns:
-        Q1 = dataframe[column].quantile(0.25)
-        Q3 = dataframe[column].quantile(0.75)
-        IQR = Q3 - Q1
+        # Save the model
+        import joblib
 
-        lower_bound = Q1 - multiplier * IQR
-        upper_bound = Q3 + multiplier * IQR
+        joblib.dump(rf_regressor, 'rf_model.pkl')
+        st.success("Model trained and saved successfully!")
 
-        dataframe = dataframe[(dataframe[column] >= lower_bound) & (dataframe[column] <= upper_bound)]
+    # Prediction Section
+    st.header("Predict the Price of an Apartment")
 
-    return dataframe
+    total_area = st.number_input("Total Area (sq. meters)", value=50, min_value=10, max_value=500, step=1)
+    nr_rooms = st.number_input("Number of rooms", value=2, min_value=1, max_value=10, step=1)
+    balcony = st.number_input("Balcony", value=1, min_value=0, max_value=5, step=1)
+    floor = st.number_input("Floor", value=1, min_value=1, max_value=30, step=1)
+    number_of_floors = st.number_input("Number of floors in the building", value=5, min_value=1, max_value=50, step=1)
+    lat = st.number_input("Latitude", value=filtered_df['Lat'].mean())
+    lon = st.number_input("Longitude", value=filtered_df['Lon'].mean())
 
-# Remove outliers based on 'Price' and 'NrRooms' columns
-df_no_outliers = remove_outliers_iqr(df_final, columns=['Price', 'NrRooms'])
+    # Create a dataframe with user inputs
+    input_df = pd.DataFrame([[total_area, nr_rooms, balcony, floor, number_of_floors, lat, lon]],
+                            columns=['TotalArea', 'NrRooms', 'Balcony', 'Floor', 'NumberOfFloors', 'Lat', 'Lon'])
 
-# Display box plot for Price distribution by NrRooms after removing outliers
-fig, ax = plt.subplots(figsize=(10, 6))
-sns.boxplot(x='NrRooms', y='Price', data=df_no_outliers, ax=ax)
-ax.set_title('Price distribution by NrRooms (after removing outliers)')
-st.pyplot(fig)
+    # Predict the GeoCluster for the input data
+    scaled_input_geo = scaler_geo.transform(input_df[['Lat', 'Lon']])
+    input_df['GeoCluster'] = kmeans_geo.predict(scaled_input_geo)
+    input_df['UpdateMonth'] = 5  # Assuming current month
+    input_df['UpdateYear'] = 2024  # Assuming current year
 
-# Train models and display evaluation scores as a bar plot
+    input_df = input_df[features]
 
-# Split dataset into training and testing
-X_var = df_no_outliers[['TotalArea', 'NrRooms', 'Balcony', 'Floor', 'NumberOfFloors', 'HousingType_Construcţii noi', 'HousingType_Secundar', 'Condition_Are nevoie de reparație', 'Condition_Construcție nefinisată', 'Condition_Dat în exploatare', 'Condition_Design individual', 'Condition_Euroreparație', 'Condition_Fără reparație', 'Condition_La alb', 'Condition_Reparație cosmetică']].values
-y_var = df_no_outliers['Price'].values
+    if st.button("Predict"):
+        # Load the trained model
+        rf_regressor = joblib.load('rf_model.pkl')
+        prediction = rf_regressor.predict(input_df)
+        st.header(f"Predicted Price: {prediction[0]:,.2f} EUR")
 
-X_train, X_test, y_train, y_test = train_test_split(X_var, y_var, test_size=0.2, random_state=0)
+    # Section for testing with custom input data
+    st.header("Test the Model with Custom Data")
 
-#Models
-#1. Linear Regression (OLS)
-ols = LinearRegression()
-ols.fit(X_train, y_train)
-ols_yhat = ols.predict(X_test)
+    uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 
-#2. Ridge Regression
-ridge = Ridge(alpha=0.5)
-ridge.fit(X_train, y_train)
-ridge_yhat = ridge.predict(X_test)
+    if uploaded_file is not None:
+        test_df = pd.read_csv(uploaded_file)
 
-# 3. Lasso Regression
-lasso = Lasso(alpha=0.01)
-lasso.fit(X_train, y_train)
-lasso_yhat = lasso.predict(X_test)
+        # Process the test data for prediction
+        scaled_test_geo = scaler_geo.transform(test_df[['Lat', 'Lon']])
+        test_df['GeoCluster'] = kmeans_geo.predict(scaled_test_geo)
+        test_df['UpdateMonth'] = 5  # Assuming current month
+        test_df['UpdateYear'] = 2024  # Assuming current year
 
-# 4. Bayesian Ridge Regression
-bayesian = BayesianRidge()
-bayesian.fit(X_train, y_train)
-bayesian_yhat = bayesian.predict(X_test)
+        # Make predictions
+        test_predictions = rf_regressor.predict(test_df[features])
 
-# 5. ElasticNet Regression
-en = ElasticNet(alpha=0.01)
-en.fit(X_train, y_train)
-en_yhat = en.predict(X_test)
-
-# 6. Decision Tree Regressor
-dtr = DecisionTreeRegressor(random_state=0)
-dtr.fit(X_train, y_train)
-dtr_yhat = dtr.predict(X_test)
-
-# Calculate Explained Variance Score and R-squared for each model
-evs_values = [evs(y_test, yhat) for yhat in [ols_yhat, ridge_yhat, lasso_yhat, bayesian_yhat, en_yhat, dtr_yhat]]
-r2_values = [r2(y_test, yhat) for yhat in [ols_yhat, ridge_yhat, lasso_yhat, bayesian_yhat, en_yhat, dtr_yhat]]
-
-# Define the labels and values for the bar plot
-labels = ['OLS', 'Ridge', 'Lasso', 'Bayesian', 'ElasticNet', 'Decision Tree']
-x = np.arange(len(labels)) # the label locations
-width = 0.35 # the width of the bars
-
-fig, ax = plt.subplots()
-rects1 = ax.bar(x - width/2, evs_values, width, label='Explained Variance Score')
-rects2 = ax.bar(x + width/2, r2_values, width, label='R-squared')
-
-# Add some text for labels, title and custom x-axis tick labels, etc.
-ax.set_ylabel('Scores')
-ax.set_title('Explained Variance Score and R-squared for Different Models')
-ax.set_xticks(x)
-ax.set_xticklabels(labels)
-ax.legend()
-
-# Function to auto-label bars
-def autolabel(rects):
- for rect in rects:
-  height = rect.get_height()
-  ax.annotate('%.2f' % height,
-  xy=(rect.get_x() + rect.get_width() / 2, height),
-  xytext=(0, 3), # 3 points vertical offset
-  textcoords="offset points",
-  ha='center', va='bottom')
-
-autolabel(rects1)
-autolabel(rects2)
-
-st.pyplot(fig)
-
-
-# Input widgets
-st.header("Predict the price of an apartment")
-
-total_area = st.number_input("Total Area (sq. meters)", value=50, min_value=10, max_value=500, step=1)
-nr_rooms = st.number_input("Number of rooms", value=2, min_value=1, max_value=10, step=1)
-balcony = st.number_input("Balcony", value=1, min_value=0, max_value=5, step=1)
-floor = st.number_input("Floor", value=1, min_value=1, max_value=30, step=1)
-number_of_floors = st.number_input("Number of floors in the building", value=5, min_value=1, max_value=50, step=1)
-
-housing_type = st.selectbox("Housing Type", ['Construcţii noi', 'Secundar'])
-condition = st.selectbox("Condition", ['Are nevoie de reparație', 'Construcție nefinisată', 'Dat în exploatare', 'Design individual', 'Euroreparație', 'Fără reparație', 'La alb', 'Reparație cosmetică'])
-
-# Create a dataframe with user inputs
-input_df = pd.DataFrame([[total_area, nr_rooms, balcony, floor, number_of_floors, housing_type, condition]], columns=['TotalArea', 'NrRooms', 'Balcony', 'Floor', 'NumberOfFloors', 'HousingType', 'Condition'])
-
-# One-hot encoding for categorical inputs
-input_OH_cols = pd.DataFrame(OH_encoder.transform(input_df[object_cols]))
-input_OH_cols.index = input_df.index
-input_OH_cols.columns = OH_encoder.get_feature_names_out()
-input_df_final = input_df.drop(object_cols, axis=1)
-input_df_final = pd.concat([input_df_final, input_OH_cols], axis=1)
-
-# Make a prediction using the best model (replace `ols` with the best-performing model)
-prediction = ols.predict(input_df_final)
-
-# Display the prediction
-st.header(f"Predicted Price: {prediction[0]:,.2f} EUR")
+        # Display the predictions
+        st.write("Predictions:")
+        st.write(test_predictions)
